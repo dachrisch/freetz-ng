@@ -7,7 +7,7 @@ $(PKG)_BINARY:=$(BASH_DIR)/bash
 $(PKG)_TARGET_BINARY:=$($(PKG)_DEST_DIR)/bin/bash
 
 $(PKG)_PATCH_POST_CMDS += $(call PKG_ADD_EXTRA_FLAGS,(C|LD)FLAGS)
-$(PKG)_EXTRA_CFLAGS  += -ffunction-sections -fdata-sections
+$(PKG)_EXTRA_CFLAGS  += -ffunction-sections -fdata-sections -std=gnu89 -fcommon -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=incompatible-pointer-types
 $(PKG)_EXTRA_LDFLAGS += -Wl,--gc-sections
 
 ifeq ($(strip $(FREETZ_PACKAGE_BASH_READLINE)),y)
@@ -59,11 +59,13 @@ $($(PKG)_BINARY): $($(PKG)_DIR)/.configured
 	$(SUBMAKE) -C $(BASH_DIR)/builtins \
 		EXTRA_CFLAGS="$(BASH_EXTRA_CFLAGS)" \
 		EXTRA_LDFLAGS="$(BASH_EXTRA_LDFLAGS)" \
+		CFLAGS_FOR_BUILD="-std=gnu89 -fcommon -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=incompatible-pointer-types" \
 		LDFLAGS_FOR_BUILD="" \
 		mkbuiltins
 	$(SUBMAKE) -C $(BASH_DIR) \
 		EXTRA_CFLAGS="$(BASH_EXTRA_CFLAGS)" \
 		EXTRA_LDFLAGS="$(BASH_EXTRA_LDFLAGS)" \
+		CFLAGS_FOR_BUILD="-std=gnu89 -fcommon -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=incompatible-pointer-types" \
 		READLINE_LDFLAGS="" \
 		HISTORY_LDFLAGS="" \
 		all
