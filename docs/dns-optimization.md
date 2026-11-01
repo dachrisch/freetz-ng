@@ -117,9 +117,13 @@ Should only show your `DNSMASQ_UPSTREAM` servers.
 
 After applying this fix:
 
-1. **DNS Resolution Speed**: Should be <200ms for uncached queries
+1. **DNS Resolution Speed**: Compare against the same query sent straight to
+   the upstream resolver, not just an absolute threshold. On slow MIPS hardware
+   <200 ms per cold name is still ~7× slower than 9.9.9.9 (see
+   [DNSSEC validation and cache sizing](#dnssec-validation-and-cache-sizing-on-slow-hardware-2026-11-01)).
    ```sh
    time nslookup google.com localhost
+   dig +stats @9.9.9.9 google.com
    ```
 
 2. **No Timeouts**: Check for DNS timeout errors
@@ -158,10 +162,10 @@ Without this command, changes will be lost on reboot.
 
 ### What `modsave flash` Does
 
-1. Creates tar archive of entire `/tmp/flash/` directory
-2. Compresses it (max 32KB)
-3. Writes to `/var/flash/freetz`
-4. Verifies write succeeded
+1. Creates a tar archive of the entire `/tmp/flash/` directory
+2. Checks the gzip-compressed size against the 32 KB limit
+3. Writes the tar to `/var/flash/freetz`
+4. Verifies the write by comparing it with the temporary archive
 
 ### On Boot
 
@@ -170,12 +174,57 @@ When router boots:
 2. Extracts to `/tmp/flash/`
 3. Applies configuration from `.diff` files
 
+## DNSSEC validation and cache sizing on slow hardware (2026-11-01)
+
+Measured on the Fritz!Box 3490 (VR9, MIPS 34Kc, 331 BogoMIPS) with dnsmasq 2.93
+and `DNSMASQ_DNSSEC='yes'`:
+
+- 10 cold names through the router: **1287 ms** (avg 129 ms, max 211 ms)
+- The same names sent directly to 9.9.9.9: **175 ms** (avg 17.5 ms)
+- dnsmasq used **one full CPU core** during the burst; loadavg reached 4.5
+- `/mod/etc/dnsmasq.conf` had no `cache-size`, so dnsmasq used its default of 150
+
+Local validation forces 6–12 extra upstream round trips per cold name (`DS` and
+`DNSKEY` at each label) plus signature verification. A 150-entry cache evicts
+almost everything, so normal browsing revalidates constantly. Quad9 already
+validates upstream and sets `AD`, which makes the local work redundant on this
+CPU.
+
+The fix reduced the same 10-name test to **227 ms** (avg 23 ms):
+
+```sh
+# /tmp/flash/dnsmasq.diff
+export DNSMASQ_DNSSEC='no'
+export DNSMASQ_LOG_QUERIES='no'
+
+# /tmp/flash/dnsmasq/dnsmasq.extra  (appended verbatim to /mod/etc/dnsmasq.conf)
+cache-size=2000
+proxy-dnssec
+```
+
+`proxy-dnssec` keeps the upstream `AD` flag visible, and `dnssec-failed.org`
+still returns `SERVFAIL` because Quad9 validates. `log-queries` is pointless
+here: there is no `/dev/log` and no syslogd running.
+
+Set the same values in `/mod/etc/conf/dnsmasq.cfg` (the file the Freetz web UI
+writes) as well, otherwise a UI save restores `yes`. Then:
+
+```sh
+/mod/etc/init.d/rc.dnsmasq restart
+modsave flash
+```
+
+`cache-size` is not exposed by the web UI; `dnsmasq.extra` is the supported
+escape hatch because `modlib_config` appends it verbatim to the generated
+config.
+
 ## Related Files
 
 - **Build-time Default:** `/make/pkgs/dnsmasq/files/root/etc/default.dnsmasq/dnsmasq.cfg`
 - **Generator Script:** `/make/pkgs/dnsmasq/files/root/etc/default.dnsmasq/dnsmasq_conf`
 - **Runtime Config:** `/mod/etc/conf/dnsmasq.cfg`
 - **User Overrides (working):** `/tmp/flash/dnsmasq.diff`
+- **Extra Options:** `/tmp/flash/dnsmasq/dnsmasq.extra` (appended verbatim)
 - **User Overrides (persistent):** `/var/flash/freetz` (contains `/tmp/flash/dnsmasq.diff`)
 - **Active Config:** `/mod/etc/dnsmasq.conf`
 
